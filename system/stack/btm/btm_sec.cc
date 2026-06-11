@@ -981,27 +981,15 @@ tBTM_STATUS btm_set_encryption(const RawAddress& bd_addr, tBT_TRANSPORT transpor
   tSECURITY_STATE& state = (transport == BT_TRANSPORT_LE) ? p_device->sec_rec.le_link
                                                           : p_device->sec_rec.classic_link;
 
-  if (com_android_bluetooth_flags_force_encryption_post_successful_pairing()) {
-    // Always push the encryption request, so that .callback and .ref will be used while processing
-    // btm_sec_check_pending_enc_req() when encryption is completed.
+  /* Enqueue security request if security is active */
+  if (p_device->sec_rec.p_callback || state != tSECURITY_STATE::IDLE) {
+    log::warn("Request enqueued, state: {}", security_state_text(state));
     btm_sec_queue_encrypt_request(bd_addr, transport, sec_act, p_callback, p_ref_data);
-    if (p_device->sec_rec.is_security_state_encrypting() || state != tSECURITY_STATE::IDLE) {
-      log::warn(
-              "Encryption already in progress, pushing this encryption request, bd_addr: {}, "
-              "state: {}",
-              bd_addr, security_state_text(state));
-      return tBTM_STATUS::BTM_CMD_STARTED;
-    }
-  } else {
-    /* Enqueue security request if security is active */
-    if (p_device->sec_rec.p_callback || state != tSECURITY_STATE::IDLE) {
-      log::warn("Request enqueued, state: {}", security_state_text(state));
-      btm_sec_queue_encrypt_request(bd_addr, transport, sec_act, p_callback, p_ref_data);
-      return tBTM_STATUS::BTM_CMD_STARTED;
-    }
-    p_device->sec_rec.p_callback = p_callback;
-    p_device->sec_rec.p_ref_data = p_ref_data;
+    return tBTM_STATUS::BTM_CMD_STARTED;
   }
+  p_device->sec_rec.p_callback = p_callback;
+  p_device->sec_rec.p_ref_data = p_ref_data;
+
   p_device->sec_rec.security_required |= (BTM_SEC_IN_AUTHENTICATE | BTM_SEC_IN_ENCRYPT);
   p_device->outgoing = false;
 
@@ -1042,10 +1030,6 @@ tBTM_STATUS btm_set_encryption(const RawAddress& bd_addr, tBT_TRANSPORT transpor
       if (p_callback) {
         log::debug("Executing encryption callback peer:{} transport:{}", bd_addr,
                    bt_transport_text(transport));
-        if (com_android_bluetooth_flags_force_encryption_post_successful_pairing()) {
-          do_in_main_thread(base::BindOnce(p_callback, bd_addr, transport, p_ref_data, rc));
-          break;
-        }
         p_device->sec_rec.p_callback = nullptr;
         do_in_main_thread(
                 base::BindOnce(p_callback, bd_addr, transport, p_device->sec_rec.p_ref_data, rc));
