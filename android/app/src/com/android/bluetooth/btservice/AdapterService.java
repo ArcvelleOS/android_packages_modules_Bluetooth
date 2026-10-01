@@ -1170,7 +1170,12 @@ public class AdapterService extends Service {
             Log.w(TAG, "Unable to resolve SystemUI's UID.", e);
         }
         mDisplayListener = new DisplayListener(this, mLooper, mPowerManager);
-        mVendor.init();
+        // Move vendor HAL init off the BT main thread. The vendor HAL's init() triggers
+        // XPAN module initialization which calls wlan_hdd_set_tx_power_feature. When
+        // WMI_SERVICE_TX_POWER_LIMIT is unavailable this call can block for several seconds,
+        // causing a deadlock on the BT main thread and subsequent process kill by the watchdog.
+        // (CR 4685589)
+        new Thread(() -> mVendor.init(), "VendorHalInit").start();
     }
 
     private void factoryResetIfNeeded() {
