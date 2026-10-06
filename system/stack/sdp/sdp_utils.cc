@@ -1708,8 +1708,8 @@ void sdpu_set_avrc_target_features(const tSDP_ATTRIBUTE* p_attr, RawAddress bdad
     return;
   }
 
-  bool browsing_supported = ((AVRCP_FEAT_BRW_BIT & avrcp_peer_features) == AVRCP_FEAT_BRW_BIT);
-  bool coverart_supported = ((AVRCP_FEAT_CA_BIT & avrcp_peer_features) == AVRCP_FEAT_CA_BIT);
+  bool browsing_supported = ((AVRCP_FEAT_BRW_BIT & avrcp_peer_features) != 0);
+  bool coverart_supported = ((AVRCP_FEAT_CA_BIT & avrcp_peer_features) != 0);
 
   log::info(
           "SDP AVRCP DB Version 0x{:x}, browse supported {}, cover art supported "
