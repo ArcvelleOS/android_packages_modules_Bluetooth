@@ -49,6 +49,7 @@ import static org.mockito.Mockito.verify;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothCodecConfig;
 import android.bluetooth.BluetoothCodecStatus;
+import android.bluetooth.BluetoothCodecType;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.os.Bundle;
@@ -202,6 +203,38 @@ public class A2dpStateMachineTest {
     }
 
     /** Test that codec config change been reported to A2dpService properly. */
+    @Test
+    public void softwareLhdcQualityChange_broadcastsWithoutRestartingAudio() {
+        BluetoothCodecType lhdc = new BluetoothCodecType(
+                7, BluetoothCodecType.CODEC_ID_LHDCV5, "LHDCv5");
+        BluetoothCodecConfig adaptive = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc)
+                .setSampleRate(BluetoothCodecConfig.SAMPLE_RATE_96000)
+                .setBitsPerSample(BluetoothCodecConfig.BITS_PER_SAMPLE_24)
+                .setChannelMode(BluetoothCodecConfig.CHANNEL_MODE_STEREO)
+                .setCodecSpecific1(0x8009)
+                .build();
+        BluetoothCodecConfig fixed = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc)
+                .setSampleRate(BluetoothCodecConfig.SAMPLE_RATE_96000)
+                .setBitsPerSample(BluetoothCodecConfig.BITS_PER_SAMPLE_24)
+                .setChannelMode(BluetoothCodecConfig.CHANNEL_MODE_STEREO)
+                .setCodecSpecific1(0x8008)
+                .build();
+        BluetoothCodecStatus initial = new BluetoothCodecStatus(
+                adaptive, List.of(adaptive), List.of(adaptive));
+        BluetoothCodecStatus updated = new BluetoothCodecStatus(
+                fixed, List.of(adaptive), List.of(adaptive));
+        doReturn(true).when(mService).isLhdcSoftwareCodec();
+
+        mStateMachine.processCodecConfigEvent(initial);
+        mStateMachine.processCodecConfigEvent(updated);
+
+        verify(mService).broadcastCodecConfig(mDevice, updated);
+        verify(mService, never()).codecConfigUpdated(mDevice, updated, true);
+        verify(mService, never()).codecConfigUpdated(mDevice, updated, false);
+    }
+
     @Test
     public void testProcessCodecConfigEvent() {
         testProcessCodecConfigEventCase(false);

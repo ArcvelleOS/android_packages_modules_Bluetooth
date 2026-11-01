@@ -655,9 +655,21 @@ final class A2dpStateMachine extends StateMachine {
             mA2dpService.updateOptionalCodecsSupport(mDevice);
         }
         mA2dpService.updateLowLatencyAudioSupport(mDevice);
+        BluetoothCodecConfig newCodecConfig = newCodecStatus.getCodecConfig();
+        if (prevCodecConfig != null
+                && newCodecConfig.sameAudioFeedingParameters(prevCodecConfig)
+                && A2dpCodecConfig.hasLhdcQualityChange(prevCodecConfig, newCodecConfig)
+                && prevCodecConfig.getCodecSpecific2() == newCodecConfig.getCodecSpecific2()
+                && prevCodecConfig.getCodecSpecific3() == newCodecConfig.getCodecSpecific3()
+                && prevCodecConfig.getCodecSpecific4() == newCodecConfig.getCodecSpecific4()
+                && mA2dpService.isLhdcSoftwareCodec()) {
+            // A software bitrate change does not change the audio feeding format or HAL session.
+            mA2dpService.enableSetCodecConfig(false);
+            mA2dpService.broadcastCodecConfig(mDevice, newCodecStatus);
+            return;
+        }
         if (mA2dpOffloadEnabled) {
             boolean update = false;
-            BluetoothCodecConfig newCodecConfig = mCodecStatus.getCodecConfig();
             if ((prevCodecConfig != null)
                     && (prevCodecConfig.getCodecType() != newCodecConfig.getCodecType())) {
                 update = true;

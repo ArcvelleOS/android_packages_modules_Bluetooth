@@ -39,6 +39,9 @@ void a2dp_vendor_lhdcv5_encoder_init(const tA2DP_ENCODER_INIT_PEER_PARAMS* p_pee
                                      a2dp_source_read_callback_t read_callback,
                                      a2dp_source_enqueue_callback_t enqueue_callback);
 
+// Update the active encoder quality on the A2DP source worker thread.
+bool a2dp_vendor_lhdcv5_set_quality(uint64_t codec_specific_1);
+
 // Cleanup the A2DP LHDC encoder.
 void a2dp_vendor_lhdcv5_encoder_cleanup(void);
 

@@ -1808,7 +1808,7 @@ tA2DP_STATUS A2dpCodecConfigLhdcV5Base::setCodecConfig(const uint8_t* p_peer_cod
       if (qualityMode >= A2DP_LHDC_QUALITY_HIGH1 && qualityMode != A2DP_LHDC_QUALITY_ABR) {
         codec_user_config_.codec_specific_1 &=
                 ~(A2DP_LHDC_VENDOR_CMD_MASK | A2DP_LHDC_QUALITY_MASK);
-        codec_user_config_.codec_specific_1 =
+        codec_user_config_.codec_specific_1 |=
                 (A2DP_LHDC_QUALITY_MAGIC_NUM | A2DP_LHDC_QUALITY_HIGH);
         qualityMode = A2DP_LHDC_QUALITY_HIGH;
         log::debug("downgrade quality mode to 0x{:02x} due to lower sample rates", qualityMode);

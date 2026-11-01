@@ -28,6 +28,7 @@ import static org.mockito.Mockito.verify;
 
 import android.bluetooth.BluetoothCodecConfig;
 import android.bluetooth.BluetoothCodecStatus;
+import android.bluetooth.BluetoothCodecType;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.res.Resources;
@@ -655,6 +656,51 @@ public class A2dpCodecConfigTest {
                 BluetoothCodecConfig.BITS_PER_SAMPLE_16,
                 multipleSupportedParameters,
                 false);
+    }
+
+    @Test
+    public void testSetCodecPreference_lhdcQualityChangeReachesNative() {
+        BluetoothCodecType lhdc = new BluetoothCodecType(7, BluetoothCodecType.CODEC_ID_LHDCV5,
+                "LHDCv5");
+        BluetoothCodecConfig current = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc)
+                .setCodecPriority(PRIORITY_HIGH)
+                .setSampleRate(BluetoothCodecConfig.SAMPLE_RATE_96000)
+                .setBitsPerSample(BluetoothCodecConfig.BITS_PER_SAMPLE_24)
+                .setChannelMode(BluetoothCodecConfig.CHANNEL_MODE_STEREO)
+                .setCodecSpecific1(0x8009)
+                .build();
+        BluetoothCodecConfig requested = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc)
+                .setCodecPriority(PRIORITY_HIGH)
+                .setSampleRate(BluetoothCodecConfig.SAMPLE_RATE_96000)
+                .setBitsPerSample(BluetoothCodecConfig.BITS_PER_SAMPLE_24)
+                .setChannelMode(BluetoothCodecConfig.CHANNEL_MODE_STEREO)
+                .setCodecSpecific1(0x8008)
+                .build();
+        BluetoothCodecStatus status = new BluetoothCodecStatus(current,
+                Arrays.asList(sCodecCapabilities[0], current),
+                Arrays.asList(sCodecCapabilities[0], current));
+
+        mA2dpCodecConfig.setCodecConfigPreference(mDevice, status, requested);
+
+        verify(mA2dpNativeInterface).setCodecConfigPreference(
+                mDevice, new BluetoothCodecConfig[] {requested});
+    }
+
+    @Test
+    public void testLhdcQualityChange_ignoresPeerBitsAndUntaggedRequests() {
+        BluetoothCodecType lhdc = new BluetoothCodecType(7, BluetoothCodecType.CODEC_ID_LHDCV5,
+                "LHDCv5");
+        BluetoothCodecConfig current = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc).setCodecSpecific1(0x18309).build();
+        BluetoothCodecConfig sameQuality = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc).setCodecSpecific1(0x8009).build();
+        BluetoothCodecConfig noQuality = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(lhdc).build();
+
+        assertThat(A2dpCodecConfig.hasLhdcQualityChange(current, sameQuality)).isFalse();
+        assertThat(A2dpCodecConfig.hasLhdcQualityChange(current, noQuality)).isFalse();
     }
 
     @Test

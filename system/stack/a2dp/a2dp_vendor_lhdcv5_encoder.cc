@@ -126,6 +126,7 @@ static void a2dp_lhdcV5_encode_frames(uint8_t nb_frame);
 
 static bool a2dp_lhdcv5_read_feeding(uint8_t* read_buffer, uint32_t* bytes_read);
 
+static bool a2dp_vendor_lhdcv5_qualitymode_wrapper(uint32_t* out, uint32_t in);
 static std::string quality_mode_index_to_name(uint32_t quality_mode_index);
 
 bool A2DP_VendorLoadEncoderLhdcV5(void) {
@@ -153,6 +154,29 @@ bool A2DP_VendorUnloadEncoderLhdcV5(void) {
 
   memset(&a2dp_lhdc_encoder_cb, 0, sizeof(a2dp_lhdc_encoder_cb));
 
+  return true;
+}
+
+bool a2dp_vendor_lhdcv5_set_quality(uint64_t codec_specific_1) {
+  if (!a2dp_lhdc_encoder_cb.has_lhdc_handle ||
+      (codec_specific_1 & A2DP_LHDC_VENDOR_CMD_MASK) != A2DP_LHDC_QUALITY_MAGIC_NUM) {
+    return false;
+  }
+  uint32_t quality = 0;
+  if (!a2dp_vendor_lhdcv5_qualitymode_wrapper(
+              &quality, codec_specific_1 & A2DP_LHDC_QUALITY_MASK)) {
+    return false;
+  }
+  if (quality == a2dp_lhdc_encoder_cb.lhdc_encoder_params.quality_mode_index) {
+    return true;
+  }
+  int32_t ret = lhdcv5BT_set_bitrate(a2dp_lhdc_encoder_cb.lhdc_handle, quality);
+  if (ret != LHDC_FRET_SUCCESS) {
+    log::error("Failed to set LHDC quality {}: {}", quality_mode_index_to_name(quality), ret);
+    return false;
+  }
+  a2dp_lhdc_encoder_cb.lhdc_encoder_params.quality_mode_index = quality;
+  log::info("Updated LHDC encoder quality to {}", quality_mode_index_to_name(quality));
   return true;
 }
 

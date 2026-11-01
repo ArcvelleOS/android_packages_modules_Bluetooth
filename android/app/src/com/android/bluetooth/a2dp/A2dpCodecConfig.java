@@ -123,7 +123,8 @@ class A2dpCodecConfig {
         if (prioritizedCodecType == currentCodecConfig.getCodecType()
                 && (prioritizedCodecType == newCodecConfig.getCodecType()
                 && (currentCodecConfig.similarCodecFeedingParameters(newCodecConfig)
-                && currentCodecConfig.sameCodecSpecificParameters(newCodecConfig)))) {
+                && currentCodecConfig.sameCodecSpecificParameters(newCodecConfig)
+                && !hasLhdcQualityChange(currentCodecConfig, newCodecConfig)))) {
             // Same codec with same parameters, no need to send this request to native.
             Log.w(TAG, "setCodecConfigPreference: codec not changed.");
             return;
@@ -138,6 +139,23 @@ class A2dpCodecConfig {
         BluetoothCodecConfig[] codecConfigArray = new BluetoothCodecConfig[1];
         codecConfigArray[0] = newCodecConfig;
         mA2dpNativeInterface.setCodecConfigPreference(device, codecConfigArray);
+    }
+
+    // LHDC quality uses a tagged command in codecSpecific1. The generic framework comparison
+    // does not compare this field for LHDC, and the remaining bits report peer capabilities.
+    static boolean hasLhdcQualityChange(
+            BluetoothCodecConfig current, BluetoothCodecConfig requested) {
+        BluetoothCodecType type = requested.getExtendedCodecType();
+        BluetoothCodecType currentType = current.getExtendedCodecType();
+        final long commandMask = 0xC000L;
+        final long qualityCommand = 0x8000L;
+        final long qualityMask = 0xFFL;
+        return type != null && currentType != null
+                && type.getCodecId() == BluetoothCodecType.CODEC_ID_LHDCV5
+                && currentType.getCodecId() == BluetoothCodecType.CODEC_ID_LHDCV5
+                && (requested.getCodecSpecific1() & commandMask) == qualityCommand
+                && (current.getCodecSpecific1() & (commandMask | qualityMask))
+                        != (requested.getCodecSpecific1() & (commandMask | qualityMask));
     }
 
     void enableOptionalCodecs(BluetoothDevice device, BluetoothCodecStatus currentCodecStatus) {

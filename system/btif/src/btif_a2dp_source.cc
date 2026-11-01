@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstring>
 #include <future>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -59,6 +60,7 @@
 #include "stack/include/a2dp_codec_api.h"
 #include "stack/include/a2dp_sbc_constants.h"
 #include "stack/include/a2dp_vendor_ldac_constants.h"
+#include "stack/include/a2dp_vendor_lhdcv5_encoder.h"
 #include "stack/include/acl_api.h"
 #include "stack/include/avdt_api.h"
 #include "stack/include/bt_hdr.h"
@@ -263,7 +265,7 @@ static void btif_a2dp_source_cleanup_codec_delayed();
 static void btif_a2dp_source_encoder_user_config_update_event(
         const RawAddress& peer_address,
         const std::vector<btav_a2dp_codec_config_t>& codec_user_preferences,
-        std::promise<void> peer_ready_promise);
+        std::promise<void> peer_ready_promise, bool lhdc_quality_only);
 static void btif_a2dp_source_audio_feeding_update_event(
         const btav_a2dp_codec_config_t& codec_audio_config);
 static bool btif_a2dp_source_audio_tx_flush_req(void);
@@ -759,13 +761,13 @@ void btif_a2dp_source_stop_audio_req(void) {
 void btif_a2dp_source_encoder_user_config_update_req(
         const RawAddress& peer_address,
         const std::vector<btav_a2dp_codec_config_t>& codec_user_preferences,
-        std::promise<void> peer_ready_promise) {
+        std::promise<void> peer_ready_promise, bool lhdc_quality_only) {
   log::info("peer_address={} state={} {} codec_preference(s)", peer_address,
             btif_a2dp_source_cb.StateStr(), codec_user_preferences.size());
 
   if (!do_in_main_thread(base::BindOnce(&btif_a2dp_source_encoder_user_config_update_event,
                                         peer_address, codec_user_preferences,
-                                        std::move(peer_ready_promise)))) {
+                                        std::move(peer_ready_promise), lhdc_quality_only))) {
     // cannot set promise but triggers crash
     log::fatal("peer_address={} state={} fails to context switch", peer_address,
                btif_a2dp_source_cb.StateStr());
@@ -775,7 +777,7 @@ void btif_a2dp_source_encoder_user_config_update_req(
 static void btif_a2dp_source_encoder_user_config_update_event(
         const RawAddress& peer_address,
         const std::vector<btav_a2dp_codec_config_t>& codec_user_preferences,
-        std::promise<void> peer_ready_promise) {
+        std::promise<void> peer_ready_promise, bool lhdc_quality_only) {
   bool restart_output = false;
   bool success = false;
   for (auto codec_user_config : codec_user_preferences) {
@@ -791,6 +793,30 @@ static void btif_a2dp_source_encoder_user_config_update_event(
     // remaining tasks like starting audio session and reporting new codec
     // will be handled by BTA_AV_RECONFIG_EVT later.
     peer_ready_promise.set_value();
+    return;
+  }
+  if (lhdc_quality_only) {
+    A2dpCodecConfig* codec = bta_av_get_a2dp_current_codec();
+    if (!success || codec == nullptr || peer_address != btif_av_source_active_peer()) {
+      log::warn("Unable to apply LHDC quality change to the active encoder");
+      peer_ready_promise.set_value();
+      return;
+    }
+    // Serialize bitrate changes with encoding and ABR adjustments on the worker thread.
+    const uint64_t codec_specific_1 = codec->getCodecConfig().codec_specific_1;
+    auto done = std::make_shared<std::promise<void>>(std::move(peer_ready_promise));
+    if (!btif_a2dp_source_thread.DoInThread(base::BindOnce(
+                [](RawAddress peer, uint64_t quality, std::shared_ptr<std::promise<void>> done) {
+                  if (peer != btif_av_source_active_peer() ||
+                      !a2dp_vendor_lhdcv5_set_quality(quality)) {
+                    log::error("Failed to update LHDC encoder quality");
+                  }
+                  done->set_value();
+                },
+                peer_address, codec_specific_1, done))) {
+      log::error("Unable to post LHDC quality change to encoder thread");
+      done->set_value();
+    }
     return;
   }
   if (!success) {

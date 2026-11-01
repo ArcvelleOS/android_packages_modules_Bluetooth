@@ -28,7 +28,6 @@
 #define A2DP_LHDC_HDR_NUM_SHIFT 2
 
 // LHDC Quality Mode Index
-// LHDC not supported auto bit rate now.
 #define A2DP_LHDC_QUALITY_MAGIC_NUM 0x8000
 
 // LHDC Peer Max/Min Target Bitrate

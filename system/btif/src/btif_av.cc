@@ -66,6 +66,7 @@
 #include "osi/include/allocator.h"
 #include "osi/include/properties.h"
 #include "stack/include/a2dp_codec_api.h"
+#include "stack/include/a2dp_vendor_lhdcv5_constants.h"
 #include "stack/include/avdt_api.h"
 #include "stack/include/avrc_api.h"
 #include "stack/include/avrc_defs.h"
@@ -590,6 +591,29 @@ public:
       osi_property_get_bool("persist.vendor.qcom.bluetooth.a2dp_offload_codec_extensibility",false);
     log::info("provider info a2dp offload extensiblity: {}, is_metadata_update: {}",
                is_a2dp_offload_codec_extensibility_enabled_, is_metadata_update);
+
+    // Only a software LHDC quality change can be applied without restarting the session.
+    bool lhdc_quality_only = false;
+    if (!is_metadata_update && current_codec != nullptr && codec_preferences.size() == 1 &&
+        !peer_address.IsEmpty() && active_peer_ == peer_address &&
+        !btif_av_is_a2dp_offload_running()) {
+      const auto current = current_codec->getCodecConfig();
+      const auto& requested = codec_preferences.front();
+      lhdc_quality_only =
+              current.codec_type == BTAV_A2DP_CODEC_INDEX_SOURCE_LHDCV5 &&
+              requested.codec_type == current.codec_type &&
+              requested.sample_rate == current.sample_rate &&
+              requested.bits_per_sample == current.bits_per_sample &&
+              requested.channel_mode == current.channel_mode &&
+              (requested.codec_specific_2 == 0 ||
+               requested.codec_specific_2 == current.codec_specific_2) &&
+              (requested.codec_specific_3 == 0 ||
+               requested.codec_specific_3 == current.codec_specific_3) &&
+              (requested.codec_specific_4 == 0 ||
+               requested.codec_specific_4 == current.codec_specific_4) &&
+              (requested.codec_specific_1 & A2DP_LHDC_VENDOR_CMD_MASK) ==
+                      A2DP_LHDC_QUALITY_MAGIC_NUM;
+    }
     bool aptX_config_change = true;
     uint16_t cs4 = 0;
     for (auto cp : codec_preferences) {
@@ -645,7 +669,7 @@ public:
       return;
     }
 
-    if (!peer_address.IsEmpty() && active_peer_ == peer_address && aptX_config_change) {
+    if (!peer_address.IsEmpty() && active_peer_ == peer_address && !lhdc_quality_only) {
       if (bluetooth::audio::a2dp::is_aidl_enabled()) {
         log::info("ignore ending session.");
       } else {
@@ -654,7 +678,7 @@ public:
     }
 
     btif_a2dp_source_encoder_user_config_update_req(peer_address, codec_preferences,
-                                                    std::move(peer_ready_promise));
+                                                    std::move(peer_ready_promise), lhdc_quality_only);
   }
 
   /**

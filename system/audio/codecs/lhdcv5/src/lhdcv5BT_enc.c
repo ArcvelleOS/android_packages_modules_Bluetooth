@@ -45,19 +45,18 @@ typedef struct _lhdc_abr_para_s {
 // store ABR parameters
 lhdc_abr_para_t handle_abr;
 
-#define LHDC_ABR_DEFAULT_BITRATE_INX (LHDC_QUALITY_LOW)
-
 // ABR: policy parameters and bit rate adjustment tables
 /*******************************************************************************/
 #define ABR_MIN_STAGE_BITRATE 160  // min bitrate(kbps) used in auto_bitrate_adjust_table_...
 #define ABR_MAX_STAGE_BITRATE \
   1000  // max bitrate(kbps) for >=96kHz (NOTE: must be smaller and equal to LHDC_ABR_MAX_BITRATE)
 #define ABR_MAX_STAGE_BITRATE_48K 900    // max bitrate(kbps) for <=48kHz (same cap as fixed HIGH)
-#define ABR_UP_RATE_TIME_CNT 3000        // ABR bitrate upgrade checking interval (by tick count)
+#define ABR_START_BITRATE 400            // ABR starts from the first stage reaching this (kbps)
+#define ABR_UP_RATE_TIME_CNT 1000        // ABR bitrate upgrade checking interval (by tick count)
 #define ABR_DOWN_RATE_TIME_CNT 4         // ABR bitrate downgrade checking interval (by tick count)
 #define ABR_UP_QUEUE_LENGTH_THRESHOLD 1  // The threshold of ABR bitrate upgrade condition
 #define ABR_DOWN_QUEUE_LENGTH_THRESHOLD 0  // The threshold of ABR bitrate downgrade condition
-#define ABR_DOWN_TARGET_STAGE 0  // The target bitrate stage of ABR table that ABR go when downgrade
+#define ABR_DOWN_TARGET_STAGE 0  // The lowest bitrate stage of ABR table that ABR can go down to
 
 static uint32_t auto_bitrate_adjust_table_lhdcv5_44k[] = {160, 192, 240,
                                                           320, 400, ABR_MAX_STAGE_BITRATE_48K};
@@ -77,6 +76,26 @@ static uint32_t auto_bitrate_adjust_table_lhdcv5_192k[] = {256, 320, 400,
 #define LHDC_192K_BITRATE_ELEMENTS_SIZE \
   (sizeof(auto_bitrate_adjust_table_lhdcv5_192k) / sizeof(uint32_t))
 /*******************************************************************************/
+
+//----------------------------------------------------------------
+// lhdcv5_enc_abr_get_start_stage ()
+//
+// Get the stage of the ABR table ABR (re)starts from: the first stage reaching
+// ABR_START_BITRATE. From there ABR steps down on congestion and up on a clear link.
+//----------------------------------------------------------------
+static uint32_t lhdcv5_enc_abr_get_start_stage(void) {
+  uint32_t stage = 0;
+
+  if (handle_abr.abr_table == NULL || handle_abr.gABR_table_size == 0) {
+    return 0;
+  }
+
+  while (stage < handle_abr.gABR_table_size - 1 &&
+         handle_abr.abr_table[stage] < ABR_START_BITRATE) {
+    stage++;
+  }
+  return stage;
+}
 
 static const char* rate_to_string(uint32_t q) {
   switch (q) {
@@ -154,7 +173,15 @@ static int lhdcv5_enc_abr_adjust_bitrate(HANDLE_LHDC_BT handle, uint32_t queueLe
         goto fail;
       }
 
-      new_abr_bitrate_inx = ABR_DOWN_TARGET_STAGE;
+      // step down to the nearest lower stage below the actual bitrate (which can be
+      // capped by the peer under the current stage), one stage at a time
+      new_abr_bitrate_inx = handle_abr.gABR_table_index;
+      while (new_abr_bitrate_inx > ABR_DOWN_TARGET_STAGE) {
+        new_abr_bitrate_inx--;
+        if (handle_abr.abr_table[new_abr_bitrate_inx] < last_bitrate) {
+          break;
+        }
+      }
       new_bitrate = handle_abr.abr_table[new_abr_bitrate_inx];
 
       func_ret = lhdcv5_enc_ffi_get_bitrate_index(handle, new_bitrate, &new_bitrate_inx);
@@ -416,8 +443,12 @@ int32_t lhdcv5BT_set_bitrate(HANDLE_LHDC_BT handle, uint32_t bitrate_inx) {
   // handle standard/control index
   switch (bitrate_inx) {
     case LHDC_QUALITY_CTRL_RESET_ABR: {
+      if (handle_abr.abr_table == NULL || handle_abr.gABR_table_size == 0) {
+        ALOGE("%s: ABR table is not initialized", __func__);
+        return LHDC_FRET_ERROR;
+      }
       // reset ABR table index
-      handle_abr.gABR_table_index = LHDC_ABR_DEFAULT_BITRATE_INX;
+      handle_abr.gABR_table_index = lhdcv5_enc_abr_get_start_stage();
 
       target_bitrate = handle_abr.abr_table[handle_abr.gABR_table_index];
 
@@ -454,8 +485,21 @@ int32_t lhdcv5BT_set_bitrate(HANDLE_LHDC_BT handle, uint32_t bitrate_inx) {
     case LHDC_QUALITY_LOW1:
     case LHDC_QUALITY_LOW0: {
       if (bitrate_inx == LHDC_QUALITY_AUTO) {
-        // reset ABR table index
-        handle_abr.gABR_table_index = LHDC_ABR_DEFAULT_BITRATE_INX;
+        if (handle_abr.abr_table == NULL || handle_abr.gABR_table_size == 0) {
+          ALOGE("%s: ABR table is not initialized", __func__);
+          return LHDC_FRET_ERROR;
+        }
+        // Restore both the encoder's adaptive mode and the ABR controller state.
+        func_ret = lhdcv5_enc_ffi_set_bitrate_index(handle, bitrate_inx, true);
+        if (func_ret != LHDC_FRET_SUCCESS) {
+          ALOGE("%s: failed to enable ABR (%d)", __func__, func_ret);
+          return LHDC_FRET_ERROR;
+        }
+        handle_abr.gABR_table_index = lhdcv5_enc_abr_get_start_stage();
+        handle_abr.down_bitrate_count = 0;
+        handle_abr.down_bitrate_sum = 0;
+        handle_abr.up_bitrate_count = 0;
+        handle_abr.up_bitrate_sum = 0;
       } else {
         // change current actual bitrate and also sync quality index
         upd_qual_status = true;
@@ -653,27 +697,26 @@ int32_t lhdcv5BT_init_encoder(HANDLE_LHDC_BT handle, uint32_t sampling_freq,
   // configure ABR, VBR control parameters
   memset(&handle_abr, 0, sizeof(lhdc_abr_para_t));
 
-  if (bitrate_inx == LHDC_QUALITY_AUTO) {
+  // Initialize the table for fixed-quality starts too, so switching to ABR works
+  // without recreating the encoder.
+  {
     if (sampling_freq == LHDC_SR_44100HZ) {
       handle_abr.abr_table = &(auto_bitrate_adjust_table_lhdcv5_44k[0]);
       handle_abr.gABR_table_size = LHDC_44K_BITRATE_ELEMENTS_SIZE;
-      handle_abr.gABR_table_index = LHDC_44K_BITRATE_ELEMENTS_SIZE - 1;
     } else if (sampling_freq == LHDC_SR_48000HZ) {
       handle_abr.abr_table = &(auto_bitrate_adjust_table_lhdcv5_48k[0]);
       handle_abr.gABR_table_size = LHDC_48K_BITRATE_ELEMENTS_SIZE;
-      handle_abr.gABR_table_index = LHDC_48K_BITRATE_ELEMENTS_SIZE - 1;
     } else if (sampling_freq == LHDC_SR_96000HZ) {
       handle_abr.abr_table = &(auto_bitrate_adjust_table_lhdcv5_96k[0]);
       handle_abr.gABR_table_size = LHDC_96K_BITRATE_ELEMENTS_SIZE;
-      handle_abr.gABR_table_index = LHDC_96K_BITRATE_ELEMENTS_SIZE - 1;
     } else if (sampling_freq == LHDC_SR_192000HZ) {
       handle_abr.abr_table = &(auto_bitrate_adjust_table_lhdcv5_192k[0]);
       handle_abr.gABR_table_size = LHDC_192K_BITRATE_ELEMENTS_SIZE;
-      handle_abr.gABR_table_index = LHDC_192K_BITRATE_ELEMENTS_SIZE - 1;
     } else {
       // should not be here
     }
 
+    handle_abr.gABR_table_index = lhdcv5_enc_abr_get_start_stage();
     handle_abr.down_bitrate_count = 0;
     handle_abr.down_bitrate_sum = 0;
     handle_abr.up_bitrate_count = 0;

@@ -1291,7 +1291,20 @@ public class A2dpService extends ConnectableProfile {
         sendBroadcast(intent, BLUETOOTH_CONNECT, Util.getTempBroadcastBundle());
     }
 
-    private void broadcastCodecConfig(BluetoothDevice device, BluetoothCodecStatus codecStatus) {
+    boolean isLhdcSoftwareCodec() {
+        if (!mA2dpOffloadEnabled) {
+            return true;
+        }
+        for (BluetoothCodecConfig codec : mA2dpCodecConfig.codecConfigOffloading()) {
+            BluetoothCodecType type = codec.getExtendedCodecType();
+            if (type != null && type.getCodecId() == BluetoothCodecType.CODEC_ID_LHDCV5) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void broadcastCodecConfig(BluetoothDevice device, BluetoothCodecStatus codecStatus) {
         Log.d(TAG, "broadcastCodecConfig(" + device + "): " + codecStatus);
         Intent intent = new Intent(BluetoothA2dp.ACTION_CODEC_CONFIG_CHANGED);
         intent.putExtra(BluetoothCodecStatus.EXTRA_CODEC_STATUS, codecStatus);
