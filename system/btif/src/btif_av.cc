@@ -624,12 +624,15 @@ public:
         }
         btav_a2dp_codec_config_t codec_config;
         codec_config = current_codec->getCodecConfig();
+        const uint16_t aptx_mode = static_cast<uint16_t>(cp.codec_specific_4 & APTX_MODE_MASK);
+        const bool has_aptx_mode =
+                cp.codec_specific_4 > 0 &&
+                (aptx_mode == APTX_HQ || aptx_mode == APTX_LL ||
+                 aptx_mode == APTX_ULL_S || aptx_mode == APTX_ULL);
         if (cp.codec_specific_4 > 0) {
           cs4 = cp.codec_specific_4;
           BTA_AvUpdateAptxData(cs4);
-          const uint16_t aptx_mode = static_cast<uint16_t>(cs4 & APTX_MODE_MASK);
-          if (aptx_mode == APTX_HQ || aptx_mode == APTX_LL ||
-              aptx_mode == APTX_ULL_S || aptx_mode == APTX_ULL) {
+          if (has_aptx_mode) {
             const bool is_gaming = (aptx_mode == APTX_LL);
             SetGamingMode(is_gaming);
             btif_av_update_aptx_mode_info(aptx_mode);
@@ -646,6 +649,14 @@ public:
             (codec_config.sample_rate == cp.sample_rate) &&
             (codec_config.channel_mode == cp.channel_mode) &&
             (codec_config.bits_per_sample == cp.bits_per_sample)) {
+          if (has_aptx_mode && !peer_address.IsEmpty() && active_peer_ == peer_address) {
+            constexpr int64_t profile_mask = APTX_MODE_MASK;
+            const int64_t updated_cs4 =
+                (codec_config.codec_specific_4 & ~profile_mask) | aptx_mode;
+            if (current_codec->updateCodecSpecific4(updated_cs4)) {
+              bta_av_co_report_codec_config_changed(peer_address);
+            }
+          }
           aptX_config_change = false;
           log::info("Aptx Adaptive core config didn't change");
           break;
