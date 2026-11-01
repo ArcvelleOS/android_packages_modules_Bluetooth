@@ -51,7 +51,8 @@ lhdc_abr_para_t handle_abr;
 /*******************************************************************************/
 #define ABR_MIN_STAGE_BITRATE 160  // min bitrate(kbps) used in auto_bitrate_adjust_table_...
 #define ABR_MAX_STAGE_BITRATE \
-  400  // max bitrate(kbps) (NOTE: must be smaller and equal to LHDC_ABR_MAX_BITRATE)
+  1000  // max bitrate(kbps) for >=96kHz (NOTE: must be smaller and equal to LHDC_ABR_MAX_BITRATE)
+#define ABR_MAX_STAGE_BITRATE_48K 900    // max bitrate(kbps) for <=48kHz (same cap as fixed HIGH)
 #define ABR_UP_RATE_TIME_CNT 3000        // ABR bitrate upgrade checking interval (by tick count)
 #define ABR_DOWN_RATE_TIME_CNT 4         // ABR bitrate downgrade checking interval (by tick count)
 #define ABR_UP_QUEUE_LENGTH_THRESHOLD 1  // The threshold of ABR bitrate upgrade condition
@@ -59,13 +60,13 @@ lhdc_abr_para_t handle_abr;
 #define ABR_DOWN_TARGET_STAGE 0  // The target bitrate stage of ABR table that ABR go when downgrade
 
 static uint32_t auto_bitrate_adjust_table_lhdcv5_44k[] = {160, 192, 240,
-                                                          320, 400, ABR_MAX_STAGE_BITRATE};
+                                                          320, 400, ABR_MAX_STAGE_BITRATE_48K};
 static uint32_t auto_bitrate_adjust_table_lhdcv5_48k[] = {160, 192, 256,
-                                                          320, 400, ABR_MAX_STAGE_BITRATE};
+                                                          320, 400, ABR_MAX_STAGE_BITRATE_48K};
 static uint32_t auto_bitrate_adjust_table_lhdcv5_96k[] = {256, 320, 400,
-                                                          400, 400, ABR_MAX_STAGE_BITRATE};
+                                                          500, 900, ABR_MAX_STAGE_BITRATE};
 static uint32_t auto_bitrate_adjust_table_lhdcv5_192k[] = {256, 320, 400,
-                                                           400, 400, ABR_MAX_STAGE_BITRATE};
+                                                           500, 900, ABR_MAX_STAGE_BITRATE};
 
 #define LHDC_44K_BITRATE_ELEMENTS_SIZE \
   (sizeof(auto_bitrate_adjust_table_lhdcv5_44k) / sizeof(uint32_t))
