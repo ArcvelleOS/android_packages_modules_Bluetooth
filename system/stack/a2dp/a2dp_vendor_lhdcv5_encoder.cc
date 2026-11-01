@@ -971,18 +971,16 @@ static std::string quality_mode_index_to_name(uint32_t quality_mode_index) {
 void a2dp_vendor_lhdcv5_set_transmit_queue_length(size_t transmit_queue_length) {
   a2dp_lhdc_encoder_cb.TxQueueLength = transmit_queue_length;
 
-  /* TODO: the implementation for lhdc_auto_adjust_bitrate is not present in
-           the lhdc rust library
-    int32_t lib_ret = 0;
-    tA2DP_LHDCV5_ENCODER_PARAMS* p_encoder_params = &a2dp_lhdc_encoder_cb.lhdc_encoder_params;
-    if (p_encoder_params->quality_mode_index == LHDC_QUALITY_AUTO) {
-        lib_ret = lhdc_auto_adjust_bitrate(a2dp_lhdc_encoder_cb.lhdc_handle,
-                                           (uint32_t)transmit_queue_length);
-        if (lib_ret != LHDC_FRET_SUCCESS) {
-          log::error("[lib_ret] lhdc_auto_adjust_bitrate error {}", lib_ret);
-        }
+  int32_t lib_ret = 0;
+  tA2DP_LHDCV5_ENCODER_PARAMS* p_encoder_params = &a2dp_lhdc_encoder_cb.lhdc_encoder_params;
+  if (a2dp_lhdc_encoder_cb.has_lhdc_handle &&
+      p_encoder_params->quality_mode_index == LHDC_QUALITY_AUTO) {
+    lib_ret = lhdcv5BT_adjust_bitrate(a2dp_lhdc_encoder_cb.lhdc_handle,
+                                      (uint32_t)transmit_queue_length);
+    if (lib_ret != LHDC_FRET_SUCCESS) {
+      log::error("[lib_ret] lhdcv5BT_adjust_bitrate error {}", lib_ret);
     }
-   */
+  }
 }
 
 void A2dpCodecConfigLhdcV5Source::debug_codec_dump(int fd) {
