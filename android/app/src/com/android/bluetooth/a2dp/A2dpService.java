@@ -1480,11 +1480,27 @@ public class A2dpService extends ConnectableProfile {
      */
     private void applyCodecIdPreference(BluetoothDevice device) {
         long codecId = getStorage().getA2dpCodecIdPreference(device);
+        SharedPreferences prefs = getSharedPreferences(A2DP_CODEC_PREFS, Context.MODE_PRIVATE);
+        String prefix = device.getAddress() + "_";
+        boolean hasSavedParams = false;
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith(prefix)) {
+                hasSavedParams = true;
+                break;
+            }
+        }
+        if (codecId == BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE && !hasSavedParams) {
+            return;
+        }
+
         BluetoothCodecStatus codecStatus = getCodecStatus(device);
         if (codecStatus == null) {
             return;
         }
         BluetoothCodecConfig current = codecStatus.getCodecConfig();
+        if (current == null) {
+            return;
+        }
 
         BluetoothCodecConfig selectable = null;
         if (codecId != BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE) {
@@ -1496,17 +1512,13 @@ public class A2dpService extends ConnectableProfile {
                 Log.i(TAG, "applyCodecIdPreference: codec " + codecId + " is not selectable");
             }
         }
-        if (selectable == null && current != null) {
-            selectable = current;
-        }
         if (selectable == null) {
-            return;
+            selectable = current;
         }
 
         BluetoothCodecType targetType = selectable.getExtendedCodecType();
         long targetCodecId = targetType != null ? targetType.getCodecId() : 0L;
 
-        SharedPreferences prefs = getSharedPreferences(A2DP_CODEC_PREFS, Context.MODE_PRIVATE);
         int savedSampleRate = prefs.getInt(getDeviceCodecPrefKey(device, targetCodecId, "sample_rate"),
                 BluetoothCodecConfig.SAMPLE_RATE_NONE);
         int savedBitsPerSample = prefs.getInt(getDeviceCodecPrefKey(device, targetCodecId, "bits_per_sample"),
@@ -1552,16 +1564,11 @@ public class A2dpService extends ConnectableProfile {
         }
         BluetoothCodecConfig requestedConfig = builder.build();
 
-        boolean matchesCodec = current != null
-                && (codecId == BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE || hasCodecId(current, codecId));
-        boolean matchesSampleRate = current != null
-                && (targetSampleRate == BluetoothCodecConfig.SAMPLE_RATE_NONE || current.getSampleRate() == targetSampleRate);
-        boolean matchesBits = current != null
-                && (targetBitsPerSample == BluetoothCodecConfig.BITS_PER_SAMPLE_NONE || current.getBitsPerSample() == targetBitsPerSample);
-        boolean matchesChannel = current != null
-                && (targetChannelMode == BluetoothCodecConfig.CHANNEL_MODE_NONE || current.getChannelMode() == targetChannelMode);
-        boolean matchesSpecific1 = current != null
-                && (savedCodecSpecific1 == 0L || !A2dpCodecConfig.hasLhdcQualityChange(current, requestedConfig));
+        boolean matchesCodec = (codecId == BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE || hasCodecId(current, codecId));
+        boolean matchesSampleRate = (targetSampleRate == BluetoothCodecConfig.SAMPLE_RATE_NONE || current.getSampleRate() == targetSampleRate);
+        boolean matchesBits = (targetBitsPerSample == BluetoothCodecConfig.BITS_PER_SAMPLE_NONE || current.getBitsPerSample() == targetBitsPerSample);
+        boolean matchesChannel = (targetChannelMode == BluetoothCodecConfig.CHANNEL_MODE_NONE || current.getChannelMode() == targetChannelMode);
+        boolean matchesSpecific1 = (savedCodecSpecific1 == 0L || !A2dpCodecConfig.hasLhdcQualityChange(current, requestedConfig));
 
         if (matchesCodec && matchesSampleRate && matchesBits && matchesChannel && matchesSpecific1) {
             return;
