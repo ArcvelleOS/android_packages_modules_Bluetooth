@@ -1427,7 +1427,7 @@ public class A2dpService extends ConnectableProfile {
 
     private static final String A2DP_CODEC_PREFS = "a2dp_codec_preferences";
 
-    private String getDeviceCodecPrefKey(BluetoothDevice device, long codecId, String param) {
+    private static String getDeviceCodecPrefKey(BluetoothDevice device, long codecId, String param) {
         return device.getAddress() + "_" + codecId + "_" + param;
     }
 
