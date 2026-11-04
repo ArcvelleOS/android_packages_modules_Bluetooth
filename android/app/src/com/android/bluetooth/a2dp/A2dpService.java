@@ -41,7 +41,9 @@ import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothUuid;
 import android.bluetooth.BufferConstraints;
 import android.companion.CompanionDeviceManager;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
@@ -837,6 +839,7 @@ public class A2dpService extends ConnectableProfile {
         if (codecType != null
                 && codecConfig.getCodecPriority() == BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST) {
             getStorage().setA2dpCodecIdPreference(device, codecType.getCodecId());
+            saveA2dpCodecParametersPreference(device, codecConfig);
         }
         mA2dpCodecConfig.setCodecConfigPreference(device, codecStatus, codecConfig);
     }
@@ -1341,6 +1344,7 @@ public class A2dpService extends ConnectableProfile {
         if (bondState != BluetoothDevice.BOND_NONE) {
             return;
         }
+        clearA2dpCodecParametersPreference(device);
         synchronized (mStateMachines) {
             A2dpStateMachine sm = mStateMachines.get(device);
             if (sm == null) {
@@ -1421,6 +1425,52 @@ public class A2dpService extends ConnectableProfile {
         }
     }
 
+    private static final String A2DP_CODEC_PREFS = "a2dp_codec_preferences";
+
+    private String getDeviceCodecPrefKey(BluetoothDevice device, long codecId, String param) {
+        return device.getAddress() + "_" + codecId + "_" + param;
+    }
+
+    private void saveA2dpCodecParametersPreference(BluetoothDevice device, BluetoothCodecConfig config) {
+        BluetoothCodecType codecType = config.getExtendedCodecType();
+        if (codecType == null) {
+            return;
+        }
+        long codecId = codecType.getCodecId();
+        SharedPreferences.Editor editor = getSharedPreferences(A2DP_CODEC_PREFS, Context.MODE_PRIVATE).edit();
+        if (config.getSampleRate() != BluetoothCodecConfig.SAMPLE_RATE_NONE) {
+            editor.putInt(getDeviceCodecPrefKey(device, codecId, "sample_rate"), config.getSampleRate());
+        }
+        if (config.getBitsPerSample() != BluetoothCodecConfig.BITS_PER_SAMPLE_NONE) {
+            editor.putInt(getDeviceCodecPrefKey(device, codecId, "bits_per_sample"), config.getBitsPerSample());
+        }
+        if (config.getChannelMode() != BluetoothCodecConfig.CHANNEL_MODE_NONE) {
+            editor.putInt(getDeviceCodecPrefKey(device, codecId, "channel_mode"), config.getChannelMode());
+        }
+        if (config.getCodecSpecific1() != 0L) {
+            editor.putLong(getDeviceCodecPrefKey(device, codecId, "codec_specific_1"), config.getCodecSpecific1());
+        }
+        editor.apply();
+        Log.i(TAG, "saveA2dpCodecParametersPreference(" + device + "): saved for codec " + codecId
+                + ": sampleRate=" + config.getSampleRate() + " specific1=0x" + Long.toHexString(config.getCodecSpecific1()));
+    }
+
+    private void clearA2dpCodecParametersPreference(BluetoothDevice device) {
+        SharedPreferences prefs = getSharedPreferences(A2DP_CODEC_PREFS, Context.MODE_PRIVATE);
+        String prefix = device.getAddress() + "_";
+        SharedPreferences.Editor editor = prefs.edit();
+        boolean changed = false;
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith(prefix)) {
+                editor.remove(key);
+                changed = true;
+            }
+        }
+        if (changed) {
+            editor.apply();
+        }
+    }
+
     /**
      * Re-selects the codec the user last chose for a device, if the peer still offers it. Codec
      * priorities do not survive a disconnection, so the choice has to be applied again every time
@@ -1430,34 +1480,96 @@ public class A2dpService extends ConnectableProfile {
      */
     private void applyCodecIdPreference(BluetoothDevice device) {
         long codecId = getStorage().getA2dpCodecIdPreference(device);
-        if (codecId == BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE) {
-            return;
-        }
         BluetoothCodecStatus codecStatus = getCodecStatus(device);
         if (codecStatus == null) {
             return;
         }
         BluetoothCodecConfig current = codecStatus.getCodecConfig();
-        if (current != null && hasCodecId(current, codecId)) {
-            return;
+
+        BluetoothCodecConfig selectable = null;
+        if (codecId != BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE) {
+            selectable = codecStatus.getCodecsSelectableCapabilities().stream()
+                    .filter(config -> hasCodecId(config, codecId))
+                    .findFirst()
+                    .orElse(null);
+            if (selectable == null) {
+                Log.i(TAG, "applyCodecIdPreference: codec " + codecId + " is not selectable");
+            }
         }
-        BluetoothCodecConfig selectable =
-                codecStatus.getCodecsSelectableCapabilities().stream()
-                        .filter(config -> hasCodecId(config, codecId))
-                        .findFirst()
-                        .orElse(null);
+        if (selectable == null && current != null) {
+            selectable = current;
+        }
         if (selectable == null) {
-            Log.i(TAG, "applyCodecIdPreference: codec " + codecId + " is not selectable");
             return;
         }
-        Log.i(TAG, "applyCodecIdPreference(" + device + "): codec " + codecId);
-        mA2dpCodecConfig.setCodecConfigPreference(
-                device,
-                codecStatus,
-                new BluetoothCodecConfig.Builder()
-                        .setExtendedCodecType(selectable.getExtendedCodecType())
-                        .setCodecPriority(BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST)
-                        .build());
+
+        BluetoothCodecType targetType = selectable.getExtendedCodecType();
+        long targetCodecId = targetType != null ? targetType.getCodecId() : 0L;
+
+        SharedPreferences prefs = getSharedPreferences(A2DP_CODEC_PREFS, Context.MODE_PRIVATE);
+        int savedSampleRate = prefs.getInt(getDeviceCodecPrefKey(device, targetCodecId, "sample_rate"),
+                BluetoothCodecConfig.SAMPLE_RATE_NONE);
+        int savedBitsPerSample = prefs.getInt(getDeviceCodecPrefKey(device, targetCodecId, "bits_per_sample"),
+                BluetoothCodecConfig.BITS_PER_SAMPLE_NONE);
+        int savedChannelMode = prefs.getInt(getDeviceCodecPrefKey(device, targetCodecId, "channel_mode"),
+                BluetoothCodecConfig.CHANNEL_MODE_NONE);
+        long savedCodecSpecific1 = prefs.getLong(getDeviceCodecPrefKey(device, targetCodecId, "codec_specific_1"), 0L);
+
+        int targetSampleRate = BluetoothCodecConfig.SAMPLE_RATE_NONE;
+        if (savedSampleRate != BluetoothCodecConfig.SAMPLE_RATE_NONE
+                && (selectable.getSampleRate() & savedSampleRate) != 0) {
+            targetSampleRate = savedSampleRate;
+        }
+
+        int targetBitsPerSample = BluetoothCodecConfig.BITS_PER_SAMPLE_NONE;
+        if (savedBitsPerSample != BluetoothCodecConfig.BITS_PER_SAMPLE_NONE
+                && (selectable.getBitsPerSample() & savedBitsPerSample) != 0) {
+            targetBitsPerSample = savedBitsPerSample;
+        }
+
+        int targetChannelMode = BluetoothCodecConfig.CHANNEL_MODE_NONE;
+        if (savedChannelMode != BluetoothCodecConfig.CHANNEL_MODE_NONE
+                && (selectable.getChannelMode() & savedChannelMode) != 0) {
+            targetChannelMode = savedChannelMode;
+        }
+
+        long targetCodecSpecific1 = savedCodecSpecific1 != 0L ? savedCodecSpecific1 : selectable.getCodecSpecific1();
+
+        BluetoothCodecConfig.Builder builder = new BluetoothCodecConfig.Builder()
+                .setExtendedCodecType(targetType)
+                .setCodecPriority(BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST);
+        if (targetSampleRate != BluetoothCodecConfig.SAMPLE_RATE_NONE) {
+            builder.setSampleRate(targetSampleRate);
+        }
+        if (targetBitsPerSample != BluetoothCodecConfig.BITS_PER_SAMPLE_NONE) {
+            builder.setBitsPerSample(targetBitsPerSample);
+        }
+        if (targetChannelMode != BluetoothCodecConfig.CHANNEL_MODE_NONE) {
+            builder.setChannelMode(targetChannelMode);
+        }
+        if (targetCodecSpecific1 != 0L) {
+            builder.setCodecSpecific1(targetCodecSpecific1);
+        }
+        BluetoothCodecConfig requestedConfig = builder.build();
+
+        boolean matchesCodec = current != null
+                && (codecId == BluetoothStorageManager.CODEC_ID_PREFERENCE_NONE || hasCodecId(current, codecId));
+        boolean matchesSampleRate = current != null
+                && (targetSampleRate == BluetoothCodecConfig.SAMPLE_RATE_NONE || current.getSampleRate() == targetSampleRate);
+        boolean matchesBits = current != null
+                && (targetBitsPerSample == BluetoothCodecConfig.BITS_PER_SAMPLE_NONE || current.getBitsPerSample() == targetBitsPerSample);
+        boolean matchesChannel = current != null
+                && (targetChannelMode == BluetoothCodecConfig.CHANNEL_MODE_NONE || current.getChannelMode() == targetChannelMode);
+        boolean matchesSpecific1 = current != null
+                && (savedCodecSpecific1 == 0L || !A2dpCodecConfig.hasLhdcQualityChange(current, requestedConfig));
+
+        if (matchesCodec && matchesSampleRate && matchesBits && matchesChannel && matchesSpecific1) {
+            return;
+        }
+
+        Log.i(TAG, "applyCodecIdPreference(" + device + "): applying user preferences: codec=" + targetCodecId
+                + " sampleRate=" + targetSampleRate + " codecSpecific1=0x" + Long.toHexString(targetCodecSpecific1));
+        mA2dpCodecConfig.setCodecConfigPreference(device, codecStatus, requestedConfig);
     }
 
     private static boolean hasCodecId(BluetoothCodecConfig config, long codecId) {
