@@ -82,7 +82,7 @@ public final class BluetoothCodecType implements Parcelable {
 
     /** Aptx Adaptive codec identifier. See {@link BluetoothCodecType#getCodecId}. */
     @SuppressLint("UnflaggedApi")
-    public static final long CODEC_ID_APTX_AD = 0x00ad00d7ff;
+    public static final long CODEC_ID_APTX_AD = 0x00ad00d7ffL;
 
     /** LHDC codec identifier. See {@link BluetoothCodecType#getCodecId}. */
     public static final long CODEC_ID_LHDCV5 = 0x4c35_053a_ffL;
