@@ -839,15 +839,14 @@ void GATTS_StopService(uint16_t service_handle);
  *                  Client Supported Features.
  *
  * Parameter        conn_id: connection identifier.
- *                  gatt_notif_vector: vector of tGATT_VALUE entries (handle, len,
- *                                     value) to include in the notification PDU.
+ *                  notifications: vector of tGATT_VALUE entries (handle, len,
+ *                                 value) to include in the notification PDU.
  *
- * Returns          GATT_SUCCESS if successfully sent; GATT_PENDING if queued
- *                  until the link is encrypted; otherwise error code.
+ * Returns          GATT_SUCCESS if successfully sent; otherwise error code.
  *
  ******************************************************************************/
 [[nodiscard]] tGATT_STATUS GATTS_HandleMultipleValueNotification(
-        tCONN_ID conn_id, std::vector<tGATT_VALUE> gatt_notif_vector);
+        tCONN_ID conn_id, const std::vector<tGATT_VALUE>& notifications);
 
 /*******************************************************************************
  *
